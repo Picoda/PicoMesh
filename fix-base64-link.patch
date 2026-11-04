@@ -1,0 +1,83 @@
+--- a/examples/companion_radio/ui-term/UITask.cpp
++++ b/examples/companion_radio/ui-term/UITask.cpp
+@@ -2,7 +2,6 @@
+ #include <target.h>
+ #include <LittleFS.h>
+ #include <helpers/ArduinoHelpers.h>
+-#include <base64.hpp>
+ #include <helpers/ui/MomentaryButton.h>
+ #include "CardKB.h"
+ #include "Ascii.h"
+@@ -13,6 +12,53 @@
+ 
+ #define UI_VERSION "pico term ui v1"
+ 
++// ---------------------------------------------------------------- base64 (channel keys)
++// Not using <base64.hpp>: that header holds full function bodies and BaseChatMesh.cpp already includes it,
++// so a second include here causes "multiple definition" errors at link time.
++static const char B64_CHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
++
++static int b64Encode(const uint8_t* in, int n, char* out) {          // NUL-terminated, returns length
++  int o = 0;
++  for (int i = 0; i < n; i += 3) {
++    uint32_t v = (uint32_t) in[i] << 16;
++    if (i + 1 < n) v |= (uint32_t) in[i + 1] << 8;
++    if (i + 2 < n) v |= in[i + 2];
++    out[o++] = B64_CHARS[(v >> 18) & 63];
++    out[o++] = B64_CHARS[(v >> 12) & 63];
++    out[o++] = (i + 1 < n) ? B64_CHARS[(v >> 6) & 63] : '=';
++    out[o++] = (i + 2 < n) ? B64_CHARS[v & 63] : '=';
++  }
++  out[o] = 0;
++  return o;
++}
++
++static int b64Value(char c) {
++  if (c >= 'A' && c <= 'Z') return c - 'A';
++  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
++  if (c >= '0' && c <= '9') return c - '0' + 52;
++  if (c == '+') return 62;
++  if (c == '/') return 63;
++  return -1;
++}
++
++static int b64Decode(const char* in, uint8_t* out, int max_out) {    // returns byte count or -1
++  uint32_t acc = 0;
++  int bits = 0, o = 0;
++  for (; *in && *in != '='; in++) {
++    if (*in == ' ' || *in == '\n' || *in == '\r') continue;
++    int v = b64Value(*in);
++    if (v < 0) return -1;
++    acc = (acc << 6) | (uint32_t) v;
++    bits += 6;
++    if (bits >= 8) {
++      bits -= 8;
++      if (o >= max_out) return -1;
++      out[o++] = (uint8_t) ((acc >> bits) & 0xFF);
++    }
++  }
++  return o;
++}
++
+ // ---------------------------------------------------------------- limits (all static memory)
+ #define CONV_MAX    16
+ #define MSG_MAX     40
+@@ -622,7 +668,7 @@
+     if (slot < 0) return false;
+     ChannelDetails cd;
+     memset(&cd, 0, sizeof(cd));
+-    int len = decode_base64((unsigned char*) psk_b64, strlen(psk_b64), cd.channel.secret);
++    int len = b64Decode(psk_b64, cd.channel.secret, 32);
+     if (len != 16 && len != 32) return false;
+     strncpy(cd.name, name, sizeof(cd.name) - 1);
+     if (!the_mesh.setChannel(slot, cd)) return false;
+@@ -1405,8 +1451,7 @@
+         uint8_t secret[16];
+         fast_rng.random(secret, sizeof(secret));
+         char b64[48];
+-        int n = encode_base64(secret, sizeof(secret), (unsigned char*) b64);
+-        b64[n] = 0;
++        b64Encode(secret, sizeof(secret), b64);
+         if (addChannelKey(ebuf, b64)) {
+           strncpy(tmp_name, ebuf, sizeof(tmp_name) - 1); tmp_name[sizeof(tmp_name) - 1] = 0;
+           strncpy(tmp_key, b64, sizeof(tmp_key) - 1); tmp_key[sizeof(tmp_key) - 1] = 0;

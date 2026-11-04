@@ -1,0 +1,159 @@
+diff --git a/examples/companion_radio/ui-term/TermDisplay.cpp b/examples/companion_radio/ui-term/TermDisplay.cpp
+index 9a9c2a5..d995c6c 100644
+--- a/examples/companion_radio/ui-term/TermDisplay.cpp
++++ b/examples/companion_radio/ui-term/TermDisplay.cpp
+@@ -1,7 +1,13 @@
+ #include "TermDisplay.h"
+ #include <SPI.h>
+ #include <Adafruit_GFX.h>
+-#include <Adafruit_ST7789.h>
++#ifdef TFT_ST7796S
++  #include <Adafruit_ST7796S_kbv.h>
++  typedef Adafruit_ST7796S_kbv Panel;
++#else
++  #include <Adafruit_ST7789.h>
++  typedef Adafruit_ST7789 Panel;
++#endif
+ 
+ #ifndef TFT_W
+   #define TFT_W 240
+@@ -16,6 +22,15 @@
+   #define TFT_SPI_HZ 24000000
+ #endif
+ 
++// Optional: size of the area the UI uses, and where it sits inside the controller's coordinates.
++// The ST7796S library is fixed at 320x480, so the visible area has to be given explicitly (-D TFT_VIS_W/TFT_VIS_H).
++#ifndef TFT_X_OFF
++  #define TFT_X_OFF 0
++#endif
++#ifndef TFT_Y_OFF
++  #define TFT_Y_OFF 0
++#endif
++
+ #define BAR_BG 0x033B   // status bar blue
+ 
+ // The colour slots the shared MeshCore UI code refers to (defined once per display driver).
+@@ -29,7 +44,7 @@ ColorVal UIColor::popup_bkg     = 0x2104;
+ ColorVal UIColor::popup_txt     = 0xFFFF;
+ ColorVal UIColor::corp_blue     = BAR_BG;
+ 
+-static Adafruit_ST7789* tft = NULL;
++static Panel* tft = NULL;
+ static GFXcanvas16* rowc = NULL;     // one text row of pixels, pushed to the panel per changed row
+ 
+ bool TermDisplay::begin() {
+@@ -42,9 +57,14 @@ bool TermDisplay::begin() {
+ 
+   SPI.setSCK(TFT_SCK);
+   SPI.setTX(TFT_MOSI);
+-  tft = new Adafruit_ST7789(&SPI, TFT_CS, TFT_DC, TFT_RST);
++#ifdef TFT_ST7796S
++  tft = new Panel(&SPI, TFT_DC, TFT_CS, TFT_RST);   // this library takes dc before cs
++  tft->begin(TFT_SPI_HZ);
++#else
++  tft = new Panel(&SPI, TFT_CS, TFT_DC, TFT_RST);
+   tft->init(TFT_W, TFT_H, TFT_SPI_MODE);
+   tft->setSPISpeed(TFT_SPI_HZ);
++#endif
+ 
+   setRotation(rot);
+   if (!ready) return false;
+@@ -57,8 +77,13 @@ void TermDisplay::setRotation(uint8_t r) {
+   rot = r & 3;
+   if (!tft) return;
+   tft->setRotation(rot);
++#ifdef TFT_VIS_W
++  pw = TFT_VIS_W;
++  ph = TFT_VIS_H;
++#else
+   pw = tft->width();
+   ph = tft->height();
++#endif
+   cw = 6 * TERM_FONT_SCALE;
+   rh = 8 * TERM_FONT_SCALE;
+   cols = pw / cw;  if (cols > TERM_COLS_MAX) cols = TERM_COLS_MAX;
+@@ -153,7 +178,7 @@ void TermDisplay::drawRow(int r, const char* text, uint16_t fg, uint16_t bg) {
+   rowc->setTextColor(fg);
+   rowc->setCursor(margin, 0);
+   rowc->print(text);
+-  tft->drawRGBBitmap(0, yoff + r * rh, rowc->getBuffer(), pw, rh);
++  tft->drawRGBBitmap(TFT_X_OFF, TFT_Y_OFF + yoff + r * rh, rowc->getBuffer(), pw, rh);
+   strncpy(shown[r], text, TERM_COLS_MAX);
+   shown[r][TERM_COLS_MAX] = 0;
+   shown_fg[r] = fg;
+diff --git a/examples/companion_radio/ui-term/UITask.cpp b/examples/companion_radio/ui-term/UITask.cpp
+index d9ac586..1716b29 100644
+--- a/examples/companion_radio/ui-term/UITask.cpp
++++ b/examples/companion_radio/ui-term/UITask.cpp
+@@ -294,6 +294,9 @@ struct Ui {
+       }
+     }
+     if (up.rot > 3) up.rot = TERM_ROTATION;
++#ifdef TFT_ST7796S
++    if (up.rot != 1 && up.rot != 3) up.rot = TERM_ROTATION;
++#endif
+     if (up.bright < 5 || up.bright > 100) up.bright = 100;
+   }
+   void saveUiPrefs() {
+@@ -1702,7 +1705,16 @@ struct Ui {
+     case PG_DISPLAY:
+       c = menuInput(k, 3);
+       if (c == -1) back();
+-      else if (c == 0) { up.rot = (up.rot + 1) & 3; display.setRotation(up.rot); saveUiPrefs(); render(); }
++      else if (c == 0) {
++#ifdef TFT_ST7796S
++        up.rot = (up.rot == 1) ? 3 : 1;              // this panel is only used in landscape
++#else
++        up.rot = (up.rot + 1) & 3;
++#endif
++        display.setRotation(up.rot);
++        saveUiPrefs();
++        render();
++      }
+       else if (c == 1) {
+         int i = 0;
+         for (int j = 0; j < 4; j++) { if (BRIGHT_LIST[j] == up.bright) i = j; }
+diff --git a/variants/rpi_pico/platformio.ini b/variants/rpi_pico/platformio.ini
+index 2e0f65f..ebdbe73 100644
+--- a/variants/rpi_pico/platformio.ini
++++ b/variants/rpi_pico/platformio.ini
+@@ -89,3 +89,39 @@ lib_deps = ${rpi_pico.lib_deps}
+   adafruit/Adafruit GFX Library @ ^1.12.0
+   adafruit/Adafruit ST7735 and ST7789 Library @ ^1.11.0
+ lib_ignore = BLE
++
++; Same firmware on a 320x240 ST7796S panel (landscape). Wiring is the same pins as the ST7789 build;
++; SDO/MISO can stay unconnected. TFT_VIS_W/H is the area the UI uses; the library itself is fixed at 320x480.
++[env:Pico_companion_term_7796]
++extends = rpi_pico
++build_flags = ${rpi_pico.build_flags}
++  -I examples/companion_radio/ui-term
++  -D MAX_CONTACTS=100
++  -D MAX_GROUP_CHANNELS=8
++  -D ENABLE_USB_INTERFACE
++  -D PICO_TERM_UI
++  -D DISPLAY_CLASS=TermDisplay
++  -D TFT_ST7796S
++  -D TFT_SCK=18
++  -D TFT_MOSI=19
++  -D TFT_CS=17
++  -D TFT_DC=21
++  -D TFT_RST=13
++  -D TFT_BL=27
++  -D TFT_VIS_W=320
++  -D TFT_VIS_H=240
++  -D TFT_SPI_HZ=24000000
++  -D TERM_ROTATION=1
++  -D TERM_FONT_SCALE=2
++  -D TERM_BTN_PIN=6
++  -D PIN_VBAT_READ=26
++  -D ADC_MULTIPLIER=10230
++build_src_filter = ${rpi_pico.build_src_filter}
++  +<../examples/companion_radio/*.cpp>
++  +<../examples/companion_radio/ui-term/*.cpp>
++lib_deps = ${rpi_pico.lib_deps}
++  densaugeo/base64 @ ~1.4.0
++  adafruit/Adafruit GFX Library @ ^1.12.0
++  adafruit/Adafruit BusIO @ ^1.14.0
++  https://github.com/prenticedavid/Adafruit_ST7796S_kbv.git
++lib_ignore = BLE
