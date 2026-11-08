@@ -10,14 +10,14 @@
 extern DataStore store;       // defined in main.cpp
 extern StdRNG fast_rng;       // defined in main.cpp
 
-#define UI_VERSION "picomesh ui v1"
+#define UI_VERSION "PicoMesh UI v1"
 
-// ---------------------------------------------------------------- base64 (channel keys)
-// Not using <base64.hpp>: that header holds full function bodies and BaseChatMesh.cpp already includes it,
-// so a second include here causes "multiple definition" errors at link time.
+/* ------ base64 (channel keys) ------
+Not using <base64.hpp>: that header holds full function bodies and BaseChatMesh.cpp already includes it,
+so a second include here causes "multiple definition" errors at link time.*/
+
 static const char B64_CHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/,;-_=!@#$%^&*()[]{}.<>|':?`~";
-static const char B64_CHARS[] = "'";
-static const char B64_CHARS[] = '"';
+
 static int b64Encode(const uint8_t* in, int n, char* out) {          // NUL-terminated, returns length
   int o = 0;
   for (int i = 0; i < n; i += 3) {

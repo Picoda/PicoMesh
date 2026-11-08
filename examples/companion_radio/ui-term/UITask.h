@@ -1,7 +1,6 @@
 #pragma once
 
 // Terminal-style UI for the plain Pico + ST7789 (+ optional CardKB and one push button).
-// The screens and flows follow MeshCore-mishmesh (onboarding, messages with delivery status,
 // contacts, radio presets, quick replies) but are drawn as text pages by TermDisplay, with all
 // state in statically allocated buffers (no heap use after start-up).
 
