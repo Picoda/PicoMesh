@@ -96,10 +96,10 @@
 
 
 ## PicoMesh TO-DO
--[] Add Default Region-Scope settings.
--[] Add Discover Nodes and Sensors settings.
--[] Contacts Auto-add settings.
--[] Radio system monitoring and logging tools.
--[] Add GPS Module and support.
--[] Emoji support for chats.
--[] Extend board targets to RP Pico 1W, RP Pico 2, RP Pico 2W.
+* [ ] Add Default Region-Scope settings.
+* [ ]  Add Discover Nodes and Sensors settings.
+* [ ] Contacts Auto-add settings. 
+* [ ] Radio system monitoring and logging tools.
+* [ ] Add GPS Module and support.
+* [ ]  Emoji support for chats.
+* [ ] Extend board targets to RP Pico 1W, RP Pico 2, RP Pico 2W.

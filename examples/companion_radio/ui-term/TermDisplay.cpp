@@ -36,7 +36,7 @@
 #include <Fonts/FreeSansBold12pt7b.h>
 #include <Fonts/FreeSansBold18pt7b.h>
 #include <Fonts/FreeSansOblique9pt7b.h>
-#include <Fonts/FreeSansOblique2pt7b.h>
+#include <Fonts/FreeSansOblique12pt7b.h>
 #include <Fonts/FreeSansOblique18pt7b.h>
 
 #ifndef TFT_W
