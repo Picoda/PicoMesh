@@ -1,14 +1,17 @@
 #include "UITask.h"
-#include <target.h>
-#include <LittleFS.h>
-#include <helpers/ArduinoHelpers.h>
-#include <helpers/ui/MomentaryButton.h>
+#ifdef UI_SIM
+  #include "sim/sim_env.h"            // desktop simulator: mock mesh, clock, storage and display
+#else
+  #include <target.h>
+  #include <LittleFS.h>
+  #include <helpers/ArduinoHelpers.h>
+  #include <helpers/ui/MomentaryButton.h>
+  extern DataStore store;       // defined in main.cpp
+  extern StdRNG fast_rng;       // defined in main.cpp
+#endif
 #include "CardKB.h"
 #include "Ascii.h"
 #include "Presets.h"
-
-extern DataStore store;       // defined in main.cpp
-extern StdRNG fast_rng;       // defined in main.cpp
 
 #define UI_VERSION "PicoMesh UI v1"
 
@@ -69,6 +72,7 @@ static int b64Decode(const char* in, uint8_t* out, int max_out) {    // returns 
 #define LP          6               // list items per page (keys 1-6, 7 previous, 8 next)
 #define EDIT_MAX    MSG_TEXT
 #define NO_CONV     0xFF
+#define MENTION_MAX 12
 #define SAVE_DELAY  300000UL        // flash is only written this long after the last change
 
 enum TermKey {
@@ -84,10 +88,11 @@ enum Pg : uint8_t {
   PG_ADVERT,
   PG_MSGS, PG_THREAD, PG_THREAD_ACT, PG_QUICK,
   PG_CONTACTS, PG_CONTACT_LIST, PG_CONTACT, PG_CONTACT_DEL, PG_HEARD,
-  PG_CHANNELS, PG_CHAN_ITEM, PG_CHAN_DEL, PG_CHAN_KEY_SHOW,
+  PG_CHANNELS, PG_CHAN_ITEM, /*PG_CHAN_SCOPE,*/ PG_CHAN_DEL, PG_CHAN_KEY_SHOW,
   PG_AIRTIME,
   PG_SETTINGS, PG_DISPLAY, PG_TIME, PG_TZ, PG_QR_LIST,
   PG_ABOUT, PG_REBOOT,
+  PG_MENTION,
   PG_EDIT
 };
 
@@ -137,21 +142,28 @@ struct UiPrefs {
   uint8_t rot;
   uint8_t bright;        // percent
   uint16_t sleep_s;      // 0 = never
+  uint8_t font;          // TermFont
+  uint8_t fsize;         // 0..2
+  uint8_t theme;         // TermTheme
+  uint8_t pad;
 };
 
 struct Stage {             // radio settings being edited, applied explicitly
   float freq, bw;
   uint8_t sf, cr;
   int8_t tx;
+  uint8_t default_scope_key[16];    //default_region_scope
+  char default_scope_name[31];
 };
 
 static const float BW_LIST[8] = { 15.6f, 20.8f, 31.25f, 41.7f, 62.5f, 125.0f, 250.0f, 500.0f };
 static const int8_t TX_LIST[8] = { 2, 5, 8, 10, 14, 17, 20, 22 };
+//static const uint8_t SCOPE_LIST[8] = { 'au', 'au-act', 'au-nsw', 'au-nsw-syd', 'au-qld', 'au-sa-test', 'au-vic', 'au-vic-metro' };
 static const uint16_t SLEEP_LIST[5] = { 0, 15, 30, 60, 300 };
 static const uint8_t BRIGHT_LIST[4] = { 25, 50, 75, 100 };
 static const char* const QR_DEFAULT[6] = { "OK", "Yes", "No", "On my way", "Thanks", "Call me" };
 
-// ---------------------------------------------------------------- the UI object
+// ==========================================the UI object=========================================
 struct Ui {
   NodePrefs* prefs = NULL;
   UITask* task = NULL;
@@ -178,6 +190,9 @@ struct Ui {
   int sel = 0, list_pg = 0;
   unsigned long splash_until = 0, toast_until = 0, last_input = 0, next_status = 0;
   char toast_txt[28];
+  const char* send_err = NULL;
+  char men[MENTION_MAX][24];
+  int men_n = 0;
   bool asleep = false;
 
   // working state
@@ -204,10 +219,26 @@ struct Ui {
   uint8_t edit_return = PG_HOME;
   int kp_cur = 0, kp_set = 0;
 
-  // ================================================================ small helpers
+  // ================================== small helpers ============================================
   static const char* cstr(const char* s) { return s ? s : ""; }
 
   int utcOffsetSecs() const { return (int) prefs->tz_offset * 3600; }
+  const char* nameForEdit() const { return strcmp(prefs->node_name, "NONAME") == 0 ? "" : prefs->node_name; }
+
+  // The Pico has no clock chip, so after a reboot its time is only right if it was set again (or a DS3231
+  // is fitted). Receivers drop direct messages whose timestamp is older than ones they already saw, so a
+  // wrong clock makes replies silently fail. "Valid" = not older than when this firmware was built.
+  static uint32_t buildEpoch() {
+    static const char* MON = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    char m[4] = { __DATE__[0], __DATE__[1], __DATE__[2], 0 };
+    const char* hit = strstr(MON, m);
+    int mon = hit ? (int) (hit - MON) / 3 + 1 : 1;
+    int day = atoi(__DATE__ + 4);
+    int year = atoi(__DATE__ + 7);
+    int hh = atoi(__TIME__), mm = atoi(__TIME__ + 3);
+    return (uint32_t) (daysFromCivil(year, mon, day) * 86400 + hh * 3600 + mm * 60);
+  }
+  bool clockValid() { return rtc_clock.getCurrentTime() + 86400UL >= buildEpoch(); }
 
   static void civilFromDays(int64_t z, int& y, int& m, int& d) {      // days since 1970-01-01
     z += 719468;
@@ -282,15 +313,15 @@ struct Ui {
     else display.pageFooter(s, TERM_GREY);
   }
 
-  // ================================================================ persistence
+  // ===================================== persistence ================================================
   void loadUiPrefs() {
     memset(&up, 0, sizeof(up));
-    up.version = 1; up.rot = TERM_ROTATION; up.bright = 100; up.sleep_s = 0;
+    up.version = 2; up.font = FONT_PIXEL; up.fsize = TERM_FONT_SCALE - 1; up.theme = THEME_WHITE; up.rot = TERM_ROTATION; up.bright = 100; up.sleep_s = 0;
     if (LittleFS.exists("/ui_prefs")) {
       File f = LittleFS.open("/ui_prefs", "r");
       if (f) {
         UiPrefs t;
-        if (f.read((uint8_t*) &t, sizeof(t)) == (int) sizeof(t) && t.version == 1) up = t;
+        if (f.read((uint8_t*) &t, sizeof(t)) == (int) sizeof(t) && t.version == 2) up = t;
         f.close();
       }
     }
@@ -299,6 +330,7 @@ struct Ui {
     if (up.rot != 1 && up.rot != 3) up.rot = TERM_ROTATION;
 #endif
     if (up.bright < 5 || up.bright > 100) up.bright = 100;
+    if (up.font >= FONT_TYPES || up.fsize > 2 || up.theme >= THEME_COUNT) { up.font = FONT_PIXEL; up.fsize = TERM_FONT_SCALE - 1; up.theme = THEME_WHITE; }
   }
   void saveUiPrefs() {
     File f = LittleFS.open("/ui_prefs", "w");
@@ -349,7 +381,7 @@ struct Ui {
     dirty_blob = false;
   }
 
-  // ================================================================ conversations and messages
+  // =================================== conversation and messages ==================================
   int totalUnread() const {
     int u = 0;
     for (int i = 0; i < CONV_MAX; i++) { if (blob.convs[i].kind) u += blob.convs[i].unread; }
@@ -461,7 +493,7 @@ struct Ui {
     return n;
   }
 
-  // ================================================================ sending (with retries)
+  // ==============================sending (with retries)==================================
   Pending* findPending(uint32_t seq) {
     for (int i = 0; i < PEND_MAX; i++) { if (pend[i].active && pend[i].seq == seq) return &pend[i]; }
     return NULL;
@@ -477,19 +509,13 @@ struct Ui {
     ContactInfo* c = NULL;
     Pending* slot = NULL;
     for (int i = 0; i < PEND_MAX; i++) { if (!pend[i].active) { slot = &pend[i]; break; } }
-    // find the contact by its stored prefix
-    int total = the_mesh.getNumContacts();
-    for (int i = 0; i < total && !c; i++) {
-      ContactInfo ci;
-      if (the_mesh.getContactByIdx(i, ci) && memcmp(ci.id.pub_key, cv.key, 6) == 0) {
-        c = the_mesh.lookupContactByPubKey(ci.id.pub_key, PUB_KEY_SIZE);
-      }
-    }
-    if (!c) return false;
+    // same lookup the companion uses for messages sent from the app: by the 6-byte key prefix
+    c = the_mesh.lookupContactByPubKey(cv.key, 6);
+    if (!c) { send_err = "contact not found"; return false; }
     uint32_t ts = rtc_clock.getCurrentTimeUnique();
     uint32_t ack = 0, est = 0;
     int r = the_mesh.sendMessage(*c, ts, 0, text, ack, est);
-    if (r == MSG_SEND_FAILED) return false;
+    if (r == MSG_SEND_FAILED) { send_err = "radio busy, try again"; return false; }
     Msg* m = addMsg(conv, 1, ts, text, 0xFF);
     m->state = 0;
     if (slot) {
@@ -551,19 +577,20 @@ struct Ui {
     }
   }
 
-  // ================================================================ radio staging
+  // ==========================radio staging====================================== 
   void stageLoad() {
-    st.freq = prefs->freq; st.bw = prefs->bw; st.sf = prefs->sf; st.cr = prefs->cr; st.tx = prefs->tx_power_dbm;
+    st.freq = prefs->freq; st.bw = prefs->bw; st.sf = prefs->sf; st.cr = prefs->cr; st.tx = prefs->tx_power_dbm; /*st.default_scope_name = prefs->default_scope_name;*/
   }
   bool stageDiffers() const {
     return fabsf(st.freq - prefs->freq) > 0.0005f || fabsf(st.bw - prefs->bw) > 0.001f ||
-           st.sf != prefs->sf || st.cr != prefs->cr || st.tx != prefs->tx_power_dbm;
+           st.sf != prefs->sf || st.cr != prefs->cr || st.tx != prefs->tx_power_dbm;/* || st.default_scope_name != prefs->default_scope_name;*/
   }
   void stageApply() {
-    prefs->freq = st.freq; prefs->bw = st.bw; prefs->sf = st.sf; prefs->cr = st.cr; prefs->tx_power_dbm = st.tx;
+    prefs->freq = st.freq; prefs->bw = st.bw; prefs->sf = st.sf; prefs->cr = st.cr; prefs->tx_power_dbm = st.tx; /*prefs->default_scope_name = st.default_scope_name;*/
     the_mesh.savePrefs();
     radio_driver.setParams(prefs->freq, prefs->bw, prefs->sf, prefs->cr);
     radio_driver.setTxPower(prefs->tx_power_dbm);
+//    radio_driver.setDefaultScope(prefs->default_scope_name);
   }
   int presetIndexOf(const Stage& s) const {
     for (int i = 0; i < PRESET_COUNT; i++) {
@@ -575,7 +602,7 @@ struct Ui {
 
   // ---- everything below is added in the following parts of the file
 
-  // ================================================================ navigation helpers
+  // ============================== navigation helpers =====================================
   void go(uint8_t p) {
     if (pg != PG_SPLASH && pg != PG_EDIT && sp < 10) stk[sp++] = pg;
     pg = p; sel = 0; list_pg = 0;
@@ -621,7 +648,35 @@ struct Ui {
     snprintf(b, sizeof(b), "%c%d %s", s ? '>' : ' ', n, text);
     display.pageLine(b, TERM_WHITE, s);
   }
-  void title(const char* t) { display.pageLine(t, TERM_GREEN); }
+  void centered(const char* t, uint16_t col) {
+    char b[TERM_COLS_MAX + 1];
+    int pad = (display.textColumns() - (int) strlen(t)) / 2;
+    if (pad < 0) pad = 0;
+    snprintf(b, sizeof(b), "%*s%s", pad, "", t);
+    display.pageLine(b, col);
+  }
+  void title(const char* t) { centered(t, TERM_GREEN); }
+  void blockLines(const char* const* lines, int n, int maxrows, uint16_t first_col, uint16_t last_col) {
+    int w = 0;
+    for (int i = 0; i < n; i++) { int l = strlen(lines[i]); if (l > w) w = l; }
+    int pad = (display.textColumns() - w) / 2;
+    if (pad < 0) pad = 0;
+    for (int i = 0; i < n && i < maxrows; i++) {
+      char b[TERM_COLS_MAX + 1];
+      snprintf(b, sizeof(b), "%*s%s", pad, "", lines[i]);
+      display.pageLine(b, i < n - 1 ? first_col : last_col);
+    }
+  }
+  void logoLines(const char* const* lines, int n) { blockLines(lines, n, 32, TERM_GREEN, TERM_WHITE); }
+  void iconLines(const char* const* lines, int n, int maxrows, uint16_t col) { blockLines(lines, n, maxrows, col, col); }
+
+  int indentFor(uint8_t p) {                               // narrow layouts are centred on wide screens
+    switch (p) {
+      case PG_THREAD: case PG_EDIT: case PG_MSGS: case PG_HEARD: case PG_AIRTIME: case PG_ABOUT: case PG_CHAN_KEY_SHOW:
+        return 0;
+      default: { int i = (display.columns() - 20) / 2; return i > 0 ? i : 0; }
+    }
+  }
 
   int wrapLines(const char* text, uint16_t colr, int maxlines) {
     int w = display.columns() - 1;
@@ -644,7 +699,7 @@ struct Ui {
     return n;
   }
 
-  // ================================================================ channels
+  // =======================channels=========================================
   bool chanUsed(int idx) {
     ChannelDetails cd;
     return the_mesh.getChannel(idx, cd) && cd.name[0] != 0;
@@ -679,7 +734,12 @@ struct Ui {
     store.saveChannels(&the_mesh);
     return true;
   }
-  void deleteChannel(int slot) {
+/*  const char* chanName(int slot) {
+    static DefaultRegion default_scope_name[31];
+    if (the_mesh.getChannel(slot, cd)) return cd.name;
+    return "?";
+  }*/
+    void deleteChannel(int slot) {
     ChannelDetails cd;
     memset(&cd, 0, sizeof(cd));
     the_mesh.setChannel(slot, cd);
@@ -688,7 +748,7 @@ struct Ui {
     if (c >= 0) { dropConvMessages(c); memset(&blob.convs[c], 0, sizeof(Conv)); markDirty(); }
   }
 
-  // ================================================================ contacts
+  // ============================== contacts ==============================================
   static bool matchFilter(const ContactInfo& ci, int filter) {
     switch (filter) {
       case 0: return ci.type == ADV_TYPE_CHAT;
@@ -755,10 +815,57 @@ struct Ui {
     static const char S[] = ".,!?:;'\"-_+=/@#()&%*$<>~ \\|^[]{}`";
     return kp_set == 0 ? L : (kp_set == 1 ? U : S);
   }
+  void ebufAppend(const char* t) {
+    int n = strlen(t);
+    if (elen + n <= emax) { memcpy(&ebuf[elen], t, n); elen += n; ebuf[elen] = 0; }
+  }
+
+  // ---- @ mentions: pick a person to insert as @[name]
+  void addMention(const char* name) {
+    if (!name[0] || men_n >= MENTION_MAX) return;
+    for (int i = 0; i < men_n; i++) { if (strcmp(men[i], name) == 0) return; }
+    strncpy(men[men_n], name, 23);
+    men[men_n][23] = 0;
+    men_n++;
+  }
+  void buildMentions() {
+    men_n = 0;
+    const Conv& cv = blob.convs[cur_conv];
+    if (cv.kind == 1) addMention(cv.name);
+    for (int n = 0; n < 40 && men_n < MENTION_MAX; n++) {   // people who wrote in this chat ("name: text")
+      Msg* m = nthMsg(cur_conv, n);
+      if (!m) break;
+      if (cv.kind != 2 || m->dir != 0) continue;
+      const char* colon = strstr(m->text, ": ");
+      if (colon && colon - m->text < 24) {
+        char nm[24];
+        int l = (int) (colon - m->text);
+        memcpy(nm, m->text, l);
+        nm[l] = 0;
+        addMention(nm);
+      }
+    }
+    int total = the_mesh.getNumContacts();                   // then everyone in the contacts
+    for (int i = total - 1; i >= 0 && men_n < MENTION_MAX; i--) {
+      ContactInfo ci;
+      if (the_mesh.getContactByIdx(i, ci) && ci.type == ADV_TYPE_CHAT) addMention(ci.name);
+    }
+  }
+  void insertMention(const char* name) {
+    char b[40];
+    snprintf(b, sizeof(b), "@[%s] ", name);
+    if (elen + (int) strlen(b) <= emax) ebufAppend(b); else toast("no room");
+  }
+  void openMention() { buildMentions(); list_pg = 0; sel = 0; pg = PG_MENTION; render(); }
+
   int kpCells() const { return kpCharCount() + 5; }       // + SPC DEL shift OK ESC
   void kpSelect() {
     int n = kpCharCount();
-    if (kp_cur < n) { if (elen < emax) { ebuf[elen++] = kpChars()[kp_cur]; ebuf[elen] = 0; } }
+    if (kp_cur < n) {
+      char ch = kpChars()[kp_cur];
+      if (ch == '@' && edit_kind == E_MSG) { openMention(); return; }
+      if (elen < emax) { ebuf[elen++] = ch; ebuf[elen] = 0; }
+    }
     else switch (kp_cur - n) {
       case 0: if (elen < emax) { ebuf[elen++] = ' '; ebuf[elen] = 0; } break;
       case 1: if (elen > 0) ebuf[--elen] = 0; break;
@@ -833,7 +940,7 @@ struct Ui {
       } else {
         const char* stt = "";
         hcol = TERM_GREEN;
-        char rt[12];
+        char rt[16];
         if (cv.kind == 1) {
           switch (m->state) {
             case 0: stt = " Sent"; break;
@@ -866,6 +973,7 @@ struct Ui {
   // ================================================================ rendering of every page
   void render() {
     display.pageClear();
+    display.pageIndent(indentFor(pg));
     char b[48], f[16];
     switch (pg) {
 
@@ -874,9 +982,9 @@ struct Ui {
       int n = big ? LOGO_L_N : LOGO_S_N;
       const char* const* lg = big ? LOGO_L : LOGO_S;
       display.pageLine("", TERM_WHITE);
-      for (int i = 0; i < n; i++) display.pageLine(lg[i], i < n - 1 ? TERM_GREEN : TERM_WHITE);
+      logoLines(lg, n);
       display.pageLine("", TERM_WHITE);
-      display.pageLine(" RP_Pico pager", TERM_GREY);
+      centered("RP_Pico pager", TERM_GREY);
       display.pageLine(UI_VERSION, TERM_GREY);
       foot("any key to start");
       break; }
@@ -885,10 +993,10 @@ struct Ui {
       bool big = display.columns() >= 30;
       int n = big ? LOGO_L_N : LOGO_S_N;
       const char* const* lg = big ? LOGO_L : LOGO_S;
-      for (int i = 0; i < n; i++) display.pageLine(lg[i], i < n - 1 ? TERM_GREEN : TERM_WHITE);
+      logoLines(lg, n);
       display.pageLine("", TERM_WHITE);
-      display.pageLine("Welcome! Let's set", TERM_WHITE);
-      display.pageLine("up your pager.", TERM_WHITE);
+      centered("Welcome! Let's set", TERM_WHITE);
+      centered("up your pager.", TERM_WHITE);
       item(1, "Start setup");
       item(2, "Skip");
       foot("1-2 or Up/Dn+Enter");
@@ -953,7 +1061,9 @@ struct Ui {
       item(7, "Heard nearby");
       item(8, "Airtime");
       item(9, "About");
-      foot("1-9 or Up/Dn+Enter");
+      if (strcmp(prefs->node_name, "NONAME") == 0) display.pageFooter("! set name: 5 then 1", TERM_ORANGE);
+      else if (!clockValid()) display.pageFooter("! clock not set: 5>4", TERM_ORANGE);
+      else foot("1-9 or Up/Dn+Enter");
       break; }
 
     case PG_RADIO: {
@@ -1019,7 +1129,7 @@ struct Ui {
 
     case PG_ADVERT:
       title("== ADVERT ==");
-      for (int i = 0; i < ICON_ADVERT_N && 4 + i < display.bodyRows() - 1; i++) display.pageLine(ICON_ADVERT[i], TERM_CYAN);
+      iconLines(ICON_ADVERT, ICON_ADVERT_N, display.bodyRows() - 5, TERM_CYAN);
       item(1, "Send (flood)");
       item(2, "Send (local only)");
       foot("0-back");
@@ -1149,7 +1259,8 @@ struct Ui {
     case PG_CHAN_ITEM:
       snprintf(b, sizeof(b), "#%s", chanName(cur_chan));
       title(b);
-      item(1, "Open chat");
+      item(0, "Open chat");
+//      item(2, "Set Region Scope");
       if (cur_chan != 0) item(2, "Delete channel");
       foot("0-back");
       break;
@@ -1221,6 +1332,9 @@ struct Ui {
       else if (up.sleep_s < 60) snprintf(b, sizeof(b), "Sleep: %ds", (int) up.sleep_s);
       else snprintf(b, sizeof(b), "Sleep: %dmin", (int) (up.sleep_s / 60));
       item(3, b);
+      snprintf(b, sizeof(b), "Font  %s", TermDisplay::fontName(up.font));                 item(4, b);
+      snprintf(b, sizeof(b), "Size  %s", TermDisplay::sizeName(up.font, up.fsize));       item(5, b);
+      snprintf(b, sizeof(b), "Color %s", TermDisplay::themeName(up.theme));               item(6, b);
       foot("0-back");
       break;
 
@@ -1278,16 +1392,30 @@ struct Ui {
       display.pageLine(b, TERM_WHITE);
       snprintf(b, sizeof(b), "Contacts %d", the_mesh.getNumContacts());
       display.pageLine(b, TERM_WHITE);
+      snprintf(b, sizeof(b), "Clock %s", clockValid() ? "ok" : "NOT SET");
+      display.pageLine(b, clockValid() ? TERM_WHITE : TERM_ORANGE);
       display.pageLine(UI_VERSION, TERM_GREY);
       foot("0-back");
       break; }
 
     case PG_REBOOT:
       title("== REBOOT ==");
-      for (int i = 0; i < ICON_POWER_N && 3 + i < display.bodyRows() - 3; i++) display.pageLine(ICON_POWER[i], TERM_RED);
+      iconLines(ICON_POWER, ICON_POWER_N, display.bodyRows() - 6, TERM_RED);
       item(1, "Reboot now");
       foot("0-cancel");
       break;
+
+    case PG_MENTION: {
+      title("== MENTION ==");
+      int np = onPage(men_n, LP);
+      if (men_n == 0) display.pageLine("(nobody yet)", TERM_GREY);
+      if (sel >= np) sel = 0;
+      for (int d = 0; d < np; d++) {
+        snprintf(b, sizeof(b), "%c%d %s", sel == d ? '>' : ' ', d + 1, men[list_pg * LP + d]);
+        display.pageLine(b, TERM_WHITE, sel == d);
+      }
+      foot(men_n > LP ? "7< 8> 0 cancel" : "0 cancel");
+      break; }
 
     case PG_EDIT:
       renderEdit();
@@ -1360,9 +1488,12 @@ struct Ui {
 
   void sendText(const char* text) {
     if (cur_conv == NO_CONV || !text[0]) return;
-    bool ok = (blob.convs[cur_conv].kind == 1) ? startDirect(cur_conv, text) : startChannel(cur_conv, text);
+    bool direct = (blob.convs[cur_conv].kind == 1);
+    if (direct && !clockValid()) { toast("set the clock first"); return; }
+    send_err = NULL;
+    bool ok = direct ? startDirect(cur_conv, text) : startChannel(cur_conv, text);
     thr_off = 0;
-    if (ok) render(); else toast("send failed");
+    if (ok) render(); else toast(send_err ? send_err : "send failed");
   }
 
   void resendFailed() {
@@ -1490,7 +1621,7 @@ struct Ui {
     case PG_ONB_NAME:
       c = menuInput(k, 2);
       if (c == -1) { pg = PG_ONB_WELCOME; sel = 0; render(); }
-      else if (c == 0) startEdit(E_NAME, "Device name", prefs->node_name, 31, PG_ONB_NAME);
+      else if (c == 0) startEdit(E_NAME, "Device name", nameForEdit(), 31, PG_ONB_NAME);
       else if (c == 1) { pg = PG_ONB_REGION; sel = 0; list_pg = 0; stageLoad(); render(); }
       break;
     case PG_ONB_REGION:
@@ -1567,8 +1698,8 @@ struct Ui {
     case PG_TX:
       c = menuInput(k, 8);
       if (c == -1) back(); else if (c >= 0) { st.tx = TX_LIST[c]; back(); }
-      break;
-
+     break;
+    
     case PG_ADVERT:
       c = menuInput(k, 2);
       if (c == -1) back();
@@ -1693,7 +1824,7 @@ struct Ui {
     case PG_SETTINGS:
       c = menuInput(k, 9);
       if (c == -1) back();
-      else if (c == 0) startEdit(E_NAME, "Node name", prefs->node_name, 31, PG_SETTINGS);
+      else if (c == 0) startEdit(E_NAME, "Node name", nameForEdit(), 31, PG_SETTINGS);
       else if (c == 1) { stageLoad(); open(PG_RADIO); }
       else if (c == 2) open(PG_DISPLAY);
       else if (c == 3) { timeLoad(); open(PG_TIME); }
@@ -1704,7 +1835,7 @@ struct Ui {
       else if (c == 8) open(PG_REBOOT);
       break;
     case PG_DISPLAY:
-      c = menuInput(k, 3);
+      c = menuInput(k, 6);
       if (c == -1) back();
       else if (c == 0) {
 #ifdef TFT_ST7796S
@@ -1729,6 +1860,9 @@ struct Ui {
         up.sleep_s = SLEEP_LIST[(i + 1) % 5];
         saveUiPrefs(); render();
       }
+      else if (c == 3) { up.font = (up.font + 1) % FONT_TYPES; display.setFont(up.font, up.fsize); saveUiPrefs(); render(); }
+      else if (c == 4) { up.fsize = (up.fsize + 1) % 3; display.setFont(up.font, up.fsize); saveUiPrefs(); render(); }
+      else if (c == 5) { up.theme = (up.theme + 1) % THEME_COUNT; display.setTheme(up.theme); saveUiPrefs(); render(); }
       break;
     case PG_TIME:
       if (k == TK_ESC || k == '0') back();
@@ -1757,12 +1891,21 @@ struct Ui {
       else if (c == 0) { flushBlob(true); delay(100); board.reboot(); }
       break;
 
+    case PG_MENTION:
+      c = listInput(k, onPage(men_n, LP), men_n, LP);
+      if (c == -1) { pg = PG_EDIT; render(); }
+      else if (c >= 0) { insertMention(men[list_pg * LP + c]); pg = PG_EDIT; render(); }
+      break;
+
     case PG_EDIT:
       if (kb_present) {
         if (k == TK_ENTER) finishEdit(true);
         else if (k == TK_ESC) finishEdit(false);
         else if (k == TK_BACKSPACE) { if (elen > 0) { ebuf[--elen] = 0; render(); } }
-        else if (k >= 32 && k < 127) { if (elen < emax) { ebuf[elen++] = (char) k; ebuf[elen] = 0; render(); } }
+        else if (k >= 32 && k < 127) {
+          if (k == '@' && edit_kind == E_MSG) openMention();
+          else if (elen < emax) { ebuf[elen++] = (char) k; ebuf[elen] = 0; render(); }
+        }
       } else {
         int n = kpCells();
         if (k == TK_NEXT || k == TK_DOWN || k == TK_RIGHT) { kp_cur = (kp_cur + 1) % n; render(); }
@@ -1862,6 +2005,8 @@ struct Ui {
     loadBlob();
     display.setRotation(up.rot);
     display.setBrightness(up.bright);
+    display.setFont(up.font, up.fsize);
+    display.setTheme(up.theme);
     kb_present = kbd.begin(Wire);
 #ifdef TERM_BTN_PIN
     btn.begin();
@@ -1904,3 +2049,9 @@ void UITask::onDiscoveredContact(ContactInfo& contact, bool is_new, uint8_t path
 void UITask::onACKRecv(uint32_t ack_crc) {
   ui.ackReceived(ack_crc);
 }
+
+#ifdef UI_SIM
+// Hooks for the desktop simulator (sim/): button gestures and a way to read the current page.
+void ui_sim_button(int k) { ui.key(k); }
+int  ui_sim_page() { return ui.pg; }
+#endif

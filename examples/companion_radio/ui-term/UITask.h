@@ -4,8 +4,12 @@
 // contacts, radio presets, quick replies) but are drawn as text pages by TermDisplay, with all
 // state in statically allocated buffers (no heap use after start-up).
 
-#include "../AbstractUITask.h"
-#include <helpers/SensorManager.h>
+#ifdef UI_SIM
+  #include "sim/sim_types.h"          // desktop simulator: stand-ins for the firmware types
+#else
+  #include "../AbstractUITask.h"
+  #include <helpers/SensorManager.h>
+#endif
 
 class UITask : public AbstractUITask {
 public:
@@ -20,6 +24,8 @@ public:
   // MyMesh::Listener
   void onMessageRecv(mesh::Packet* pkt, const ContactInfo& from, uint8_t txt_type, uint32_t sender_timestamp, const char* text) override;
   void onChannelMessageRecv(mesh::Packet* pkt, ChannelDetails& channel_details, const char* text) override;
+//  void onChannelDataRecv(mesh::Packet *pkt, const mesh::GroupChannel &channel, uint16_t data_type,
+//                         const uint8_t *data, size_t data_len) { }
   void onQueueSizeChanged(int msgcount) override { }
   void onDiscoveredContact(ContactInfo& contact, bool is_new, uint8_t path_len, const uint8_t* path) override;
   void onACKRecv(uint32_t ack_crc) override;

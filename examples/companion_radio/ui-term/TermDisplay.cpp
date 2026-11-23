@@ -8,6 +8,36 @@
   #include <Adafruit_ST7789.h>
   typedef Adafruit_ST7789 Panel;
 #endif
+#include <Fonts/FreeMono9pt7b.h>
+#include <Fonts/FreeMono12pt7b.h>
+#include <Fonts/FreeMono18pt7b.h>
+#include <Fonts/FreeMonoBold9pt7b.h>
+#include <Fonts/FreeMonoBold12pt7b.h>
+#include <Fonts/FreeMonoBold18pt7b.h>
+#include <Fonts/FreeMonoOblique9pt7b.h>
+#include <Fonts/FreeMonoOblique12pt7b.h>
+#include <Fonts/FreeMonoOblique18pt7b.h>
+#include <Fonts/FreeMonoBoldOblique9pt7b.h>
+#include <Fonts/FreeMonoBoldOblique12pt7b.h>
+#include <Fonts/FreeMonoBoldOblique18pt7b.h>
+#include <Fonts/FreeSerif9pt7b.h>
+#include <Fonts/FreeSerif12pt7b.h>
+#include <Fonts/FreeSerif18pt7b.h>
+#include <Fonts/FreeSerifBold9pt7b.h>
+#include <Fonts/FreeSerifBold12pt7b.h>
+#include <Fonts/FreeSerifBold18pt7b.h>
+#include <Fonts/FreeSerifItalic9pt7b.h>
+#include <Fonts/FreeSerifItalic12pt7b.h>
+#include <Fonts/FreeSerifItalic18pt7b.h>
+#include <Fonts/FreeSans9pt7b.h>
+#include <Fonts/FreeSans12pt7b.h>
+#include <Fonts/FreeSans18pt7b.h>
+#include <Fonts/FreeSansBold9pt7b.h>
+#include <Fonts/FreeSansBold12pt7b.h>
+#include <Fonts/FreeSansBold18pt7b.h>
+#include <Fonts/FreeSansOblique9pt7b.h>
+#include <Fonts/FreeSansOblique2pt7b.h>
+#include <Fonts/FreeSansOblique18pt7b.h>
 
 #ifndef TFT_W
   #define TFT_W 240
@@ -22,8 +52,8 @@
   #define TFT_SPI_HZ 24000000
 #endif
 
-// Optional: size of the area the UI uses, and where it sits inside the controller's coordinates.
-// The ST7796S library is fixed at 320x480, so the visible area has to be given explicitly (-D TFT_VIS_W/TFT_VIS_H).
+// Where the text area sits inside the controller's pixel area. Default is the top-left corner; the ST7796S
+// library is fixed at 320x480, so -D TFT_VIS_W/TFT_VIS_H give the area that is really visible.
 #ifndef TFT_X_OFF
   #define TFT_X_OFF 0
 #endif
@@ -31,7 +61,7 @@
   #define TFT_Y_OFF 0
 #endif
 
-#define BAR_BG 0x033B   // status bar blue
+#define BAR_BG 0x033B   // default status bar blue
 
 // The colour slots the shared MeshCore UI code refers to (defined once per display driver).
 ColorVal UIColor::window_bkg    = 0x0000;
@@ -44,8 +74,52 @@ ColorVal UIColor::popup_bkg     = 0x2104;
 ColorVal UIColor::popup_txt     = 0xFFFF;
 ColorVal UIColor::corp_blue     = BAR_BG;
 
+struct ThemeColors { uint16_t fg, acc, grey, bar, sel; };
+static const ThemeColors THEMES[THEME_COUNT] = {
+  { 0xFFFF, 0x07E0, 0xBDF7, 0x033B, 0x07FF },    // White
+  { 0x07E0, 0xFFE0, 0x0400, 0x0200, 0x07E0 },    // Green (classic terminal)
+  { 0xFD20, 0xFFE0, 0x9B00, 0x4200, 0xFD20 },    // Amber
+  { 0x07FF, 0xFFFF, 0x0410, 0x0210, 0x07FF },    // Cyan
+};
+
+static const GFXfont* const FONT_TABLE[FONT_TYPES][3] = {
+  { NULL, NULL, NULL },
+  { &FreeMono9pt7b, &FreeMono12pt7b, &FreeMono18pt7b },
+  { &FreeMonoBold9pt7b, &FreeMonoBold12pt7b, &FreeMonoBold18pt7b },
+  { &FreeMonoOblique9pt7b, &FreeMonoOblique12pt7b, &FreeMonoOblique18pt7b },
+  { &FreeMonoBoldOblique9pt7b, &FreeMonoBoldOblique12pt7b, &FreeMonoBoldOblique18pt7b },
+  { &FreeSerif9pt7b, &FreeSerif12pt7b, &FreeSerif18pt7b },
+  { &FreeSerifBold9pt7b, &FreeSerifBold12pt7b, &FreeSerifBold18pt7b },
+  { &FreeSerifItalic9pt7b, &FreeSerifItalic12pt7b, &FreeSerifItalic18pt7b },
+  { &FreeSans9pt7b, &FreeSans12pt7b, &FreeSans18pt7b },
+  { &FreeSansBold9pt7b, &FreeSansBold12pt7b, &FreeSansBold18pt7b },
+  { &FreeSansOblique9pt7b, &FreeSansOblique12pt7b, &FreeSansOblique18pt7b },
+};
+
 static Panel* tft = NULL;
 static GFXcanvas16* rowc = NULL;     // one text row of pixels, pushed to the panel per changed row
+
+const char* TermDisplay::fontName(uint8_t t) {
+  static const char* const N[FONT_TYPES] = { "Pixel", "Mono", "Mono bold", "Mono italic", "Mono bold italic", "Serif", "Serif bold", "Serif italic", "Sans", "Sans bold", "Sans italic" };
+  return N[t % FONT_TYPES];
+}
+const char* TermDisplay::sizeName(uint8_t type, uint8_t size) {
+  static const char* const PX[3] = { "1x", "2x", "3x" };
+  static const char* const MN[3] = { "9pt", "12pt", "18pt" };
+  return (type == FONT_PIXEL ? PX : MN)[size % 3];
+}
+const char* TermDisplay::themeName(uint8_t t) {
+  static const char* const N[THEME_COUNT] = { "White", "Green", "Amber", "Cyan" };
+  return N[t % THEME_COUNT];
+}
+
+uint16_t TermDisplay::themed(uint16_t c) const {
+  const ThemeColors& th = THEMES[theme];
+  if (c == TERM_WHITE) return th.fg;
+  if (c == TERM_GREEN) return th.acc;
+  if (c == TERM_GREY) return th.grey;
+  return c;
+}
 
 bool TermDisplay::begin() {
   if (ready) return true;
@@ -57,6 +131,9 @@ bool TermDisplay::begin() {
 
   SPI.setSCK(TFT_SCK);
   SPI.setTX(TFT_MOSI);
+#ifdef SD_MISO
+  SPI.setRX(SD_MISO);                           // an SD card shares this bus (its own chip select)
+#endif
 #ifdef TFT_ST7796S
   tft = new Panel(&SPI, TFT_DC, TFT_CS, TFT_RST);   // this library takes dc before cs
   tft->begin(TFT_SPI_HZ);
@@ -74,6 +151,27 @@ bool TermDisplay::begin() {
   return true;
 }
 
+void TermDisplay::setFont(uint8_t type, uint8_t size) {
+  font_type = type % FONT_TYPES;
+  font_size = size % 3;
+  if (ready) setRotation(rot);                  // geometry depends on the font
+}
+
+void TermDisplay::setTheme(uint8_t t) {
+  theme = t % THEME_COUNT;
+  for (int i = 0; i < ROWS_MAX; i++) shown_ok[i] = false;
+  dirty = true;
+}
+
+void TermDisplay::applyFont() {
+  if (!rowc) return;
+  const GFXfont* f = FONT_TABLE[font_type][font_size];
+  rowc->setFont(f);                             // NULL = the built-in pixel font
+  rowc->setTextSize(f ? 1 : font_size + 1);
+  rowc->setTextWrap(false);
+  rowc->cp437(true);
+}
+
 void TermDisplay::setRotation(uint8_t r) {
   rot = r & 3;
   if (!tft) return;
@@ -85,26 +183,31 @@ void TermDisplay::setRotation(uint8_t r) {
   pw = tft->width();
   ph = tft->height();
 #endif
-  cw = 6 * TERM_FONT_SCALE;
-  rh = 8 * TERM_FONT_SCALE;
+  const GFXfont* f = FONT_TABLE[font_type][font_size];
+  if (f) {
+    cw = f->glyph['M' - f->first].xAdvance;
+    rh = f->yAdvance;
+    ty = (rh * 3) / 4;                          // baseline
+  } else {
+    cw = 6 * (font_size + 1);
+    rh = 8 * (font_size + 1);
+    ty = 0;
+  }
   cols = pw / cw;  if (cols > TERM_COLS_MAX) cols = TERM_COLS_MAX;
   rows = ph / rh;  if (rows > ROWS_MAX) rows = ROWS_MAX;
   trows = rows - 2; if (trows < 1) trows = 1;
   margin = (pw - cols * cw) / 2;
   yoff = (ph - rows * rh) / 2;
 
-  if (rowc && rowc->width() != pw) { delete rowc; rowc = NULL; }
+  x_off = TFT_X_OFF;
+  y_off = TFT_Y_OFF;
+
+  if (rowc && (rowc->width() != pw || rowc->height() != rh)) { delete rowc; rowc = NULL; }
   if (!rowc) {
     rowc = new GFXcanvas16(pw, rh);
-    if (rowc && rowc->getBuffer()) {
-      rowc->setTextSize(TERM_FONT_SCALE);
-      rowc->setTextWrap(false);
-      rowc->cp437(true);
-    } else {
-      delete rowc;
-      rowc = NULL;
-    }
+    if (!(rowc && rowc->getBuffer())) { delete rowc; rowc = NULL; }
   }
+  applyFont();
   ready = (rowc != NULL);
   tft->fillScreen(0x0000);
   for (int i = 0; i < ROWS_MAX; i++) shown_ok[i] = false;
@@ -145,6 +248,7 @@ void TermDisplay::setStatus(const char* left, const char* right) {
 
 void TermDisplay::pageClear() {
   page_n = 0;
+  page_indent = 0;
   footer[0] = 0;
   footer_fg = TERM_GREY;
   dirty = true;
@@ -172,18 +276,31 @@ void TermDisplay::pageShow() {
   refresh();
 }
 
-void TermDisplay::drawRow(int r, const char* text, uint16_t fg, uint16_t bg) {
+void TermDisplay::drawRow(int r, const char* text, uint16_t fg, uint16_t bg, bool sel) {
   if (!ready || r < 0 || r >= ROWS_MAX) return;
-  if (shown_ok[r] && shown_fg[r] == fg && shown_bg[r] == bg && strcmp(shown[r], text) == 0) return;
-  rowc->fillScreen(bg);
-  rowc->setTextColor(fg);
-  rowc->setCursor(margin, 0);
+  if (shown_ok[r] && shown_fg[r] == fg && shown_bg[r] == bg && shown_sel[r] == sel && strcmp(shown[r], text) == 0) return;
+  const ThemeColors& th = THEMES[theme];
+  uint16_t pbg = (bg == BAR_BG) ? th.bar : bg;
+  rowc->fillScreen(sel ? 0x0000 : pbg);
+  uint16_t pfg = themed(fg);
+  if (sel) {
+    // a highlight box around the words only, not the whole row
+    int i0 = 0, i1 = strlen(text);
+    while (i0 < i1 && text[i0] == ' ') i0++;
+    while (i1 > i0 && text[i1 - 1] == ' ') i1--;
+    rowc->fillRect(margin + i0 * cw - 2, 0, (i1 - i0) * cw + 4, rh, th.sel);
+    pfg = 0x0000;
+  }
+  rowc->setTextColor(pfg);
+
+  rowc->setCursor(margin, ty);
   rowc->print(text);
-  tft->drawRGBBitmap(TFT_X_OFF, TFT_Y_OFF + yoff + r * rh, rowc->getBuffer(), pw, rh);
+  tft->drawRGBBitmap(x_off, y_off + yoff + r * rh, rowc->getBuffer(), pw, rh);
   strncpy(shown[r], text, TERM_COLS_MAX);
   shown[r][TERM_COLS_MAX] = 0;
   shown_fg[r] = fg;
   shown_bg[r] = bg;
+  shown_sel[r] = sel;
   shown_ok[r] = true;
 }
 
@@ -199,16 +316,19 @@ void TermDisplay::refresh() {
   snprintf(buf, sizeof(buf), "%-*.*s%s%s", lw, lw, bar_left, rl ? " " : "", bar_right);
   drawRow(0, buf, TERM_WHITE, BAR_BG);
 
+  int ind = page_indent;
   for (int i = 0; i < trows; i++) {
     if (i < page_n) {
-      snprintf(buf, sizeof(buf), "%.*s", cols, page[i].text);
-      if (page[i].sel) drawRow(1 + i, buf, 0x0000, TERM_SEL_BG);
-      else drawRow(1 + i, buf, page[i].fg, 0x0000);
+      snprintf(buf, sizeof(buf), "%*s%.*s", ind, "", cols - ind, page[i].text);
+      drawRow(1 + i, buf, page[i].sel ? 0x0000 : page[i].fg, 0x0000, page[i].sel);
     } else {
       drawRow(1 + i, "", TERM_WHITE, 0x0000);
     }
   }
 
-  snprintf(buf, sizeof(buf), "%.*s", cols, footer);
+  // footer: hints are centred, an edit line ("> text") stays left aligned
+  int fl = strlen(footer);
+  int pad = (footer[0] == '>' || fl >= cols) ? 0 : (cols - fl) / 2;
+  snprintf(buf, sizeof(buf), "%*s%.*s", pad, "", cols - pad, footer);
   drawRow(rows - 1, buf, footer_fg, 0x0000);
 }
