@@ -1,7 +1,7 @@
 # PicoMesh (MeshCore Companion Pager)
 - PicoMesh is a Portable  MeshCore companion radio with Raspberry Pi Pico and the Waveshare SX1262 LoRa 32 Radio.
 - A standalone MeshCore companion pager with it's own custom terminal style tiny UI for affordable off-grid mesh comms.
-- Read about [PicoMesh/README-MeshCore.md] and its capabilities.
+- Read about [MeshCore](https://github.com/meshcore-dev/MeshCore/blob/main/README.md) and its capabilities.
 ## Hardware specifications:
 - Raspberry Pi - Pico 1 RP2040 microprocessor.
 - Waveshare SX1262 LoRa 32 Radio Module.
@@ -94,3 +94,12 @@
 
 >==🔴/variant/rpi_pico==
 
+
+## PicoMesh TO-DO
+-[] Add Default Region-Scope settings.
+-[] Add Discover Nodes and Sensors settings.
+-[] Contacts Auto-add settings.
+-[] Radio system monitoring and logging tools.
+-[] Add GPS Module and support.
+-[] Emoji support for chats.
+-[] Extend board targets to RP Pico 1W, RP Pico 2, RP Pico 2W.
