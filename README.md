@@ -5,10 +5,10 @@
 ## Hardware specifications:
 - Raspberry Pi - Pico 1 RP2040 microprocessor.
 - Waveshare SX1262 LoRa 32 Radio Module.
-- Compatible with ST7789 (240 X 240) and ST7896S (480 X 320) displays.
+- Compatible with ST7789 (240 X 240) and ST7896S (320 X 240) displays.
 - M5 stack Card KB V.1 keyboard.
 - DS3231 RTC module to keep UI time.
-- MicroSD card module for added flash and storage.(Many ST7896S displays come with an embedded SD card reader)
+- [//]: # "MicroSD card module for added flash and storage.(Many ST7896S displays come with an embedded SD card reader)"
 
 ## Wiring and Connection chart:
 
@@ -42,30 +42,30 @@
 |SDA                    |GPIO 4                 |
 |SCL                    |GPIO 5                 |
 
-| SD Card Module | RaspberryPi<br>Pico 1 |
-|:--------------:|:---------------------:|
-|SCK             |                       |
-|MOSI            |                       |
-|MISO            |                       |
-|CS              |                       |
+[//]: # ( | SD Card Module | RaspberryPi<br>Pico 1 |)
+[//]: # (| :--------------:|:---------------------:|)
+[//]: # (|SCK             |                       |)
+[//]: # (|MOSI            |                       |)
+[//]: # (|MISO            |                       |)
+[//]: # (|CS              |                       |)
 
 | RTC DS3231 Module | RaspberryPi<br>Pico 1 |
-|:-----------------:|:---------------------:|
-|VCC (+)            |                       |
-|GND (-)            |                       |
-|SDA (D)            |                       |
-|SCL (C)            |                       |
+|:-----------------:|:----------------------:|
+|VCC (+)            |3V3 (OUT)               |
+|GND (-)            |GND                     |
+|SDA (D)            |GPIO 4                  |
+|SCL (C)            |GPIO 5                  |
 
 ## UI Specifications:
 - The UI is a fork of the original MeshCore firmware.
 - Tiny terminal style UI targeted at the Raspberry Pi Pico 1 and it's limited flash size availability.
-- Approximately 20KB of memory usage in total after compile on the RPPico; No heap usage after startup.
+- Approximately 30KB of memory usage in total after compile on the RPPico; No heap usage after startup.
 - USB port is enabled, so is compatible with MeshCore App, MeshCore Web client and Meshcore-CLI.
 - Conversations written to flash every 5 mins, after a change or a reboot. so the busy channels do not fill up the flash memory.
 - Contact lists are indexed once and then cached. 
 - Display orientation, brightness control and screen timeout settings.
 - basic terminal color, Fonts and accent themes built in the UI.
-- `@` key for manetions and replies in group chats.
+- `@` key for mentions and replies in group chats.
 - 5 slots for presaved messages / quick replies
 - Radio presets available for quick switching frequencies to desired location.
 
@@ -101,5 +101,5 @@
 * [ ] Contacts Auto-add settings. 
 * [ ] Radio system monitoring and logging tools.
 * [ ] Add GPS Module and support.
-* [ ]  Emoji support for chats.
+* [ ] Emoji support for chats.
 * [ ] Extend board targets to RP Pico 1W, RP Pico 2, RP Pico 2W.

@@ -88,15 +88,16 @@ enum Pg : uint8_t {
   PG_ADVERT,
   PG_MSGS, PG_THREAD, PG_THREAD_ACT, PG_QUICK,
   PG_CONTACTS, PG_CONTACT_LIST, PG_CONTACT, PG_CONTACT_DEL, PG_HEARD,
-  PG_CHANNELS, PG_CHAN_ITEM, /*PG_CHAN_SCOPE,*/ PG_CHAN_DEL, PG_CHAN_KEY_SHOW,
+  PG_CHANNELS, PG_CHAN_ITEM, PG_CHAN_DEL, PG_CHAN_KEY_SHOW,
   PG_AIRTIME,
   PG_SETTINGS, PG_DISPLAY, PG_TIME, PG_TZ, PG_QR_LIST,
   PG_ABOUT, PG_REBOOT,
   PG_MENTION,
+//  PG_SCOPE
   PG_EDIT
 };
 
-enum EditKind : uint8_t { E_NAME, E_MSG, E_QR, E_CHAN_NEW, E_CHAN_JOIN_NAME, E_CHAN_JOIN_KEY, E_FREQ };
+enum EditKind : uint8_t { E_NAME, E_MSG, E_QR, E_CHAN_NEW, E_CHAN_JOIN_NAME, E_CHAN_JOIN_KEY, E_FREQ/*, E_SCOPE*/ };
 
 // ---------------------------------------------------------------- stored data
 struct Conv {
@@ -532,7 +533,7 @@ struct Ui {
   bool startChannel(int conv, const char* text) {
     const Conv& cv = blob.convs[conv];
     ChannelDetails cd;
-    if (!the_mesh.getChannel(cv.chan, cd) || cd.name[0] == 0) return false;
+    if (!the_mesh.getChannel(cv.chan, cd) || cd.name[0] == 0/*, prefs->default_scope_name*/) return false;
     uint32_t ts = rtc_clock.getCurrentTimeUnique();
     if (!the_mesh.sendGroupMessage(ts, cd.channel, prefs->node_name, text, strlen(text))) return false;
     Msg* m = addMsg(conv, 1, ts, text, 0xFF);
@@ -1414,7 +1415,7 @@ struct Ui {
         snprintf(b, sizeof(b), "%c%d %s", sel == d ? '>' : ' ', d + 1, men[list_pg * LP + d]);
         display.pageLine(b, TERM_WHITE, sel == d);
       }
-      foot(men_n > LP ? "7< 8> 0 cancel" : "0 cancel");
+      foot(men_n > LP ? "<7 8> 0 cancel" : "0 cancel");
       break; }
 
     case PG_EDIT:
@@ -1470,7 +1471,7 @@ struct Ui {
       line[TERM_COLS_MAX] = 0;
       display.pageLine(line, has ? TERM_YELLOW : TERM_WHITE);
     }
-    display.pageFooter("click next long pick", TERM_GREY);
+    display.pageFooter("click next / press & hold select", TERM_GREY);
   }
 
   // ================================================================ actions
