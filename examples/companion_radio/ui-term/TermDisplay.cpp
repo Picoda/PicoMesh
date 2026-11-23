@@ -1,6 +1,7 @@
 #include "TermDisplay.h"
 #include <SPI.h>
 #include <Adafruit_GFX.h>
+
 #ifdef TFT_ST7796S
   #include <Adafruit_ST7796S_kbv.h>
   typedef Adafruit_ST7796S_kbv Panel;
@@ -8,6 +9,7 @@
   #include <Adafruit_ST7789.h>
   typedef Adafruit_ST7789 Panel;
 #endif
+
 #include <Fonts/FreeMono9pt7b.h>
 #include <Fonts/FreeMono12pt7b.h>
 #include <Fonts/FreeMono18pt7b.h>
