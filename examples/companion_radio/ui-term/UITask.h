@@ -24,8 +24,6 @@ public:
   // MyMesh::Listener
   void onMessageRecv(mesh::Packet* pkt, const ContactInfo& from, uint8_t txt_type, uint32_t sender_timestamp, const char* text) override;
   void onChannelMessageRecv(mesh::Packet* pkt, ChannelDetails& channel_details, const char* text) override;
-//  void onChannelDataRecv(mesh::Packet *pkt, const mesh::GroupChannel &channel, uint16_t data_type,
-//                         const uint8_t *data, size_t data_len) { }
   void onQueueSizeChanged(int msgcount) override { }
   void onDiscoveredContact(ContactInfo& contact, bool is_new, uint8_t path_len, const uint8_t* path) override;
   void onACKRecv(uint32_t ack_crc) override;

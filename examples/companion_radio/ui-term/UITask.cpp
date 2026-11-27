@@ -533,9 +533,9 @@ struct Ui {
   bool startChannel(int conv, const char* text) {
     const Conv& cv = blob.convs[conv];
     ChannelDetails cd;
-    if (!the_mesh.getChannel(cv.chan, cd) || cd.name[0] == 0/*, prefs->default_scope_name*/) return false;
+    if (!the_mesh.getChannel(cv.chan, cd) || cd.name[0] == 0 , prefs->default_scope_name, 0) return false;
     uint32_t ts = rtc_clock.getCurrentTimeUnique();
-    if (!the_mesh.sendGroupMessage(ts, cd.channel, prefs->node_name, text, strlen(text))) return false;
+    if (!the_mesh.sendGroupMessage(ts, cd.channel, prefs->default_scope_name, prefs->node_name, text, strlen(text))) return false;
     Msg* m = addMsg(conv, 1, ts, text, 0xFF);
     m->state = 0;                       // channels have no acknowledgement
     return true;
@@ -633,8 +633,8 @@ struct Ui {
   int listInput(int k, int on_page, int total, int per_page) {
     if (k == '0' || k == TK_ESC) return -1;
     if (total > per_page) {
-      if (k == '7') { if (list_pg > 0) { list_pg--; sel = 0; render(); } return -2; }
-      if (k == '8') { if ((list_pg + 1) * per_page < total) { list_pg++; sel = 0; render(); } return -2; }
+      if (k == TK_LEFT || k == '7') { if (list_pg > 0) { list_pg--; sel = 0; render(); } return -2; }
+      if (k == TK_RIGHT || k == '8') { if ((list_pg + 1) * per_page < total) { list_pg++; sel = 0; render(); } return -2; }
     }
     if (k >= '1' && k <= '9' && (k - '1') < on_page) { sel = k - '1'; return sel; }
     if (k == TK_DOWN || k == TK_NEXT) { if (on_page) sel = (sel + 1) % on_page; render(); return -2; }
@@ -992,8 +992,8 @@ struct Ui {
 
     case PG_ONB_WELCOME: {
       bool big = display.columns() >= 30;
-      int n = big ? LOGO_L_N : LOGO_S_N;
-      const char* const* lg = big ? LOGO_L : LOGO_S;
+      int n = big ? ICON_PICOMESH_N : ICON_PICOMESH_N;
+      const char* const* lg = big ? ICON_PICOMESH : ICON_PICOMESH;
       logoLines(lg, n);
       display.pageLine("", TERM_WHITE);
       centered("Welcome! Let's set", TERM_WHITE);
