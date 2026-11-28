@@ -42,7 +42,7 @@ static const char* const ICON_POWER[] = {
 };
 static const int ICON_POWER_N = sizeof(ICON_POWER) / sizeof(ICON_POWER[0]);
 
-static const char* const ICON_PICOMESH[] = {
+/*static const char* const ICON_PICOMESH[] = {
   R"~(|=============================================|)~",
   R"~(|    ___ _                           _        |)~",
   R"~(|   //_ (+) ___ ___  /\/\   ___  ___| |____   |)~",
@@ -51,5 +51,26 @@ static const char* const ICON_PICOMESH[] = {
   R"~(| \/    |_|\___\___/\/    \/\___||___)_| |_|  |)~",
   R"~(|-+M E S H C O R E+-+-+-+-+-+-F O R-+-P I C O-|)~",
   R"~(|=============================================|)~",
+};
+static const int ICON_PICOMESH_N = sizeof(ICON_PICOMESH) / sizeof(ICON_PICOMESH[0]);
+*/
+static const char* const ICON_PICOMESH[] = {
+
+ R"~(          __)~",
+ R"~(   _____ /\_\    ___    ___)~",
+ R"~(  /\ '__`\/\ \  /'___\ / __`\)~",
+ R"~(  \ \ \L\ \ \ \/\ \__//\ \L\ \)~",
+ R"~(   \ \ ,__/\ \_\ \____\ \____/)~",
+ R"~(    \ \ \/  \/_/\/____/\/___/)~",
+ R"~(     \ \_\)~",
+ R"~(      \/_/)~",
+ R"~(                         __)~",
+ R"~(  /'\_/`\               /\ \)~",
+ R"~( /\      \     __    ___\ \ \___)~",
+ R"~( \ \ \__\ \  /'__`\ /',__\ \  _ `\)~",
+ R"~(  \ \ \_/\ \/\  __//\__, `\ \ \ \ \)~",
+ R"~(   \ \_\\ \_\ \____\/\____/\ \_\ \_\)~",
+ R"~(    \/_/ \/_/\/____/\/___/  \/_/\/_/)~",
+ 
 };
 static const int ICON_PICOMESH_N = sizeof(ICON_PICOMESH) / sizeof(ICON_PICOMESH[0]);

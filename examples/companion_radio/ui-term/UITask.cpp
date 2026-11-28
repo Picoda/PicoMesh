@@ -1,4 +1,5 @@
 #include "UITask.h"
+#include "TermDisplay.h"
 #ifdef UI_SIM
   #include "sim/sim_env.h"            // desktop simulator: mock mesh, clock, storage and display
 #else
@@ -535,7 +536,7 @@ struct Ui {
     ChannelDetails cd;
     if (!the_mesh.getChannel(cv.chan, cd) || cd.name[0] == 0 , prefs->default_scope_name, 0) return false;
     uint32_t ts = rtc_clock.getCurrentTimeUnique();
-    if (!the_mesh.sendGroupMessage(ts, cd.channel, prefs->default_scope_name, prefs->node_name, text, strlen(text))) return false;
+    if (!the_mesh.sendGroupMessage(ts, cd.channel, /*prefs->default_scope_name,*/ prefs->node_name, text, strlen(text))) return false;
     Msg* m = addMsg(conv, 1, ts, text, 0xFF);
     m->state = 0;                       // channels have no acknowledgement
     return true;
@@ -584,7 +585,7 @@ struct Ui {
   }
   bool stageDiffers() const {
     return fabsf(st.freq - prefs->freq) > 0.0005f || fabsf(st.bw - prefs->bw) > 0.001f ||
-           st.sf != prefs->sf || st.cr != prefs->cr || st.tx != prefs->tx_power_dbm;/* || st.default_scope_name != prefs->default_scope_name;*/
+           st.sf != prefs->sf || st.cr != prefs->cr || st.tx != prefs->tx_power_dbm; /*|| st.default_scope_name != prefs->default_scope_name;*/
   }
   void stageApply() {
     prefs->freq = st.freq; prefs->bw = st.bw; prefs->sf = st.sf; prefs->cr = st.cr; prefs->tx_power_dbm = st.tx; /*prefs->default_scope_name = st.default_scope_name;*/
@@ -898,7 +899,7 @@ struct Ui {
     snprintf(b, n, "%02d:%02d", s / 3600, (s % 3600) / 60);
   }
 
-  // ================================================================ chat thread drawing
+  // ============================chat thread drawing==================================== 
   int wrapInto(char out[][TERM_COLS_MAX + 1], int max_lines, const char* text) {
     int w = display.columns() - 1;
     if (w < 8) w = 8;
@@ -918,9 +919,23 @@ struct Ui {
     return n;
   }
 
+static void alignLine(char* dst, const char* src, int width, int right) {
+   if (width > TERM_COLS_MAX) width = TERM_COLS_MAX;  
+   if (width < 1 ) width = 1;
+  int len = (int)strlen(src);
+    if (len > width) len = width;
+    int pad = right ? width - len : 0;
+    if (pad < 0) pad = 0;
+    memset(dst, ' ', pad);
+    memcpy(dst + pad, src, len);
+    dst[pad + len] = '\0';
+}
+
   void renderThread() {
     static char L[32][TERM_COLS_MAX + 1];
     static uint16_t C[32];
+    int cols = display.columns() - 1;   // same width wrapInto uses, leaves last column free
+    if (cols < 8) cols = 8;
     int tr = display.bodyRows();
     int cap = tr - 1;
     if (cap > 31) cap = 31;
@@ -957,12 +972,14 @@ struct Ui {
       int room = cap - filled;
       int take = bl > room ? room : bl;
       int start = bl - take;                          // keep the bottom part if the block does not fit
-      for (int i = take - 1; i >= 0; i--) {
-        int dst = cap - 1 - filled - (take - 1 - i);
-        strncpy(L[dst], blk[start + i], TERM_COLS_MAX);
-        L[dst][TERM_COLS_MAX] = 0;
-        C[dst] = (start + i == 0) ? hcol : TERM_WHITE;
+
+    for (int i = take - 1; i >= 0; i--) {
+     int dst = cap - 1 - filled - (take - 1 - i);
+     alignLine(L[dst], blk[start + i], cols, m->dir != 0);
+     C[dst] = (start + i == 0) ? hcol : TERM_WHITE;
       }
+
+
       filled += take;
     }
     title(cv.name);
@@ -980,8 +997,9 @@ struct Ui {
 
     case PG_SPLASH: {
       bool big = display.columns() >= 30;
-      int n = big ? LOGO_L_N : LOGO_S_N;
-      const char* const* lg = big ? LOGO_L : LOGO_S;
+      bool sml = display.columns() <= 20;
+      int n = sml ? ICON_PICOMESH_N : ICON_PICOMESH_N;
+      const char* const* lg = sml ? ICON_PICOMESH : ICON_PICOMESH;
       display.pageLine("", TERM_WHITE);
       logoLines(lg, n);
       display.pageLine("", TERM_WHITE);

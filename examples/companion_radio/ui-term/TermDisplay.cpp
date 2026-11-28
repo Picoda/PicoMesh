@@ -98,6 +98,19 @@ static const GFXfont* const FONT_TABLE[FONT_TYPES][3] = {
   { &FreeSansOblique9pt7b, &FreeSansOblique12pt7b, &FreeSansOblique18pt7b },
 };
 
+// Sans and Serif are proportional (a space is a third of an "M"), but the UI lays text out on a character grid:
+// indents, centring, the status bar, highlight boxes and the ASCII-art logos all count in cells. So a proportional
+// font is drawn one glyph per cell, each glyph centred in its cell, which keeps every font aligned the same way.
+static bool isProportional(const GFXfont* f) {
+  return f && f->glyph['i' - f->first].xAdvance != f->glyph['M' - f->first].xAdvance;
+}
+static int gridCell(const GFXfont* f) {                  // width of one character cell, in pixels
+  if (!isProportional(f)) return f->glyph['M' - f->first].xAdvance;
+  int sum = 0, n = 0;
+  for (const char* p = "abcdefghijklmnopqrstuvwxyz0123456789"; *p; p++) { sum += f->glyph[*p - f->first].xAdvance; n++; }
+  return (sum + n - 1) / n + 1;                          // average lower-case / digit width, rounded up, plus 1 px
+}
+
 static Panel* tft = NULL;
 static GFXcanvas16* rowc = NULL;     // one text row of pixels, pushed to the panel per changed row
 
@@ -187,7 +200,7 @@ void TermDisplay::setRotation(uint8_t r) {
 #endif
   const GFXfont* f = FONT_TABLE[font_type][font_size];
   if (f) {
-    cw = f->glyph['M' - f->first].xAdvance;
+    cw = gridCell(f);
     rh = f->yAdvance;
     ty = (rh * 3) / 4;                          // baseline
   } else {
@@ -295,8 +308,19 @@ void TermDisplay::drawRow(int r, const char* text, uint16_t fg, uint16_t bg, boo
   }
   rowc->setTextColor(pfg);
 
-  rowc->setCursor(margin, ty);
-  rowc->print(text);
+  const GFXfont* f = FONT_TABLE[font_type][font_size];
+  if (isProportional(f)) {
+    for (int i = 0; text[i]; i++) {                      // one glyph per grid cell, centred in it
+      uint8_t ch = (uint8_t) text[i];
+      if (ch <= ' ' || ch < f->first || ch > f->last) continue;
+      const GFXglyph& g = f->glyph[ch - f->first];
+      rowc->setCursor(margin + i * cw + (cw - (int) g.width) / 2 - g.xOffset, ty);
+      rowc->write(ch);
+    }
+  } else {
+    rowc->setCursor(margin, ty);
+    rowc->print(text);
+  }
   tft->drawRGBBitmap(x_off, y_off + yoff + r * rh, rowc->getBuffer(), pw, rh);
   strncpy(shown[r], text, TERM_COLS_MAX);
   shown[r][TERM_COLS_MAX] = 0;
